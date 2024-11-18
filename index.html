@@ -1,0 +1,272 @@
+<html lang="en">
+<head>
+    <title>Xero-Recorder</title>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta http-equiv="X-UA-Compatible" content="ie=edge">
+    <script src="https://ajax.googleapis.com/ajax/libs/jquery/3.4.1/jquery.min.js"></script> 
+    <script src="node_modules/Recorder.js"></script> 
+    <script src="node_modules/Screenshot.js"></script>
+
+    <script id="vertexShader" type="x-shader/x-vertex">
+        varying vec2 vUv;
+        void main() {
+            vUv = vec2(uv.x, 1.0-uv.y);
+            gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+        }
+    </script>
+
+    <script id="fragmentShader" type="x-shader/x-fragment">
+        varying vec2 vUv;
+        uniform sampler2D tDiffuse;
+        void main() {
+            gl_FragColor = texture2D(tDiffuse, vUv);
+        }
+    </script>
+
+    <script type="module">
+        import {
+            OrthographicCamera,
+            Scene,
+            WebGLRenderTarget,
+            LinearFilter,
+            NearestFilter,
+            RGBAFormat,
+            UnsignedByteType,
+            CfxTexture,
+            ShaderMaterial,
+            PlaneBufferGeometry,
+            Mesh,
+            WebGLRenderer
+        } from "/node_modules/Three.js";
+
+        let config = null;
+        let isRunning = false;
+
+        class VideoRecorder {
+            constructor() {
+                this.initializeComponents();
+                this.setupEventListeners();
+                this.startRenderLoop();
+            }
+
+            initializeComponents() {
+                this.cameraRTT = new OrthographicCamera(
+                    window.innerWidth / -2,
+                    window.innerWidth / 2,
+                    window.innerHeight / 2,
+                    window.innerHeight / -2,
+                    -10000,
+                    10000
+                );
+                this.cameraRTT.position.z = 0;
+                this.cameraRTT.setViewOffset(
+                    window.innerWidth,
+                    window.innerHeight,
+                    0,
+                    0,
+                    window.innerWidth,
+                    window.innerHeight
+                );
+
+                this.sceneRTT = new Scene();
+                this.rtTexture = new WebGLRenderTarget(
+                    window.innerWidth,
+                    window.innerHeight,
+                    {
+                        minFilter: LinearFilter,
+                        magFilter: NearestFilter,
+                        format: RGBAFormat,
+                        type: UnsignedByteType
+                    }
+                );
+
+                const gameTexture = new CfxTexture();
+                gameTexture.needsUpdate = true;
+                this.material = new ShaderMaterial({
+                    uniforms: { "tDiffuse": { value: gameTexture } },
+                    vertexShader: document.getElementById('vertexShader').textContent,
+                    fragmentShader: document.getElementById('fragmentShader').textContent
+                });
+
+                const plane = new PlaneBufferGeometry(window.innerWidth, window.innerHeight);
+                const quad = new Mesh(plane, this.material);
+                quad.position.z = 1;
+                this.sceneRTT.add(quad);
+
+                this.renderer = new WebGLRenderer();
+                this.renderer.setSize(window.innerWidth, window.innerHeight);
+                this.renderer.autoClear = true;
+
+                this.gameTexture = gameTexture;
+                this.nowRecording = false;
+            }
+
+            setupEventListeners() {
+                window.addEventListener('resize', this.handleResize.bind(this));
+                window.addEventListener('message', this.handleMessage.bind(this));
+            }
+
+            handleMessage(event) {
+                const { action, data } = event.data;
+                switch(action) {
+                    case "config":
+                        config = data;
+                        break;
+                    case "task":
+                        if(!isRunning) {
+                            this.startRecording();
+                        }
+                        break;
+                }
+            }
+
+            handleResize() {
+                this.cameraRTT = new OrthographicCamera(
+                    window.innerWidth / -2,
+                    window.innerWidth / 2,
+                    window.innerHeight / 2,
+                    window.innerHeight / -2,
+                    -10000,
+                    10000
+                );
+                this.cameraRTT.position.z = 0;
+                this.cameraRTT.setViewOffset(
+                    window.innerWidth,
+                    window.innerHeight,
+                    0,
+                    0,
+                    window.innerWidth,
+                    window.innerHeight
+                );
+                
+                this.renderer.setSize(window.innerWidth, window.innerHeight);
+            }
+
+            startRecording() {
+                this.trigger(true);
+                setTimeout(() => {
+                    this.record();
+                }, 1000);
+                
+                setTimeout(() => {
+                    this.stopRecording();
+                    this.trigger(false);
+                }, 10000);
+            }
+
+            startRenderLoop() {
+                const animate = () => {
+                    requestAnimationFrame(animate);
+                    if (isRunning) {
+                        this.render();
+                    }
+                };
+                animate();
+            }
+
+            render() {
+                this.renderer.clear();
+                this.renderer.render(this.sceneRTT, this.cameraRTT, this.rtTexture, true);
+                
+                if (this.canvas) {
+                    const read = new Uint8Array(window.innerWidth * window.innerHeight * 4);
+                    this.renderer.readRenderTargetPixels(
+                        this.rtTexture,
+                        0,
+                        0,
+                        window.innerWidth,
+                        window.innerHeight,
+                        read
+                    );
+
+                    this.canvas.width = window.innerWidth;
+                    this.canvas.height = window.innerHeight;
+                    const ctx = this.canvas.getContext('2d');
+                    const imageData = new ImageData(
+                        new Uint8ClampedArray(read.buffer),
+                        window.innerWidth,
+                        window.innerHeight
+                    );
+                    ctx.putImageData(imageData, 0, 0);
+                }
+            }
+
+            record() {
+                if (VideoRecorder.recorder && VideoRecorder.recorder.state === "inactive") {
+                    VideoRecorder.recorder.startRecording();
+                    this.nowRecording = true;
+                }
+            }
+
+            stopRecording() {
+                this.nowRecording = false;
+                VideoRecorder.recorder.stopRecording((url) => {
+                    this.uploadVideo(url);
+                });
+            }
+
+            uploadVideo(videoBlob) {
+                const form = new FormData();
+                form.append('username', "xero_recorder");
+                form.append('files[]', videoBlob, "xero_video_recorder.webm");
+
+                $.ajax({
+                    type: 'POST',
+                    url: config.VideoWebhook,
+                    data: form,
+                    processData: false,
+                    contentType: false
+                }).done((data) => {
+                    const videoUrl = data.attachments[0].url.split("?")[0];
+                    
+                    $.post(`https://${GetParentResourceName()}/saveVideoData`, 
+                        JSON.stringify({ data: { url: videoUrl } })
+                    );
+
+                    this.cleanup();
+                });
+            }
+
+            cleanup() {
+                setTimeout(() => {
+                    isRunning = false;
+                }, 400);
+            }
+
+            trigger(run) {
+                this.canvas = document.getElementsByTagName("canvas")[0] || 
+                            document.body.appendChild(document.createElement("CANVAS"));
+                VideoRecorder.recorder = RecordRTC(this.canvas, {
+                    type: 'canvas',
+                    mimeType: 'video/webm'
+                });
+                if (!isRunning) {
+                    isRunning = run;
+                }
+            }
+        }
+
+        $(window).ready(() => {
+            window.videoRecorder = new VideoRecorder();
+            $.post(`https://${GetParentResourceName()}/reqConfig`);
+            
+            ['log', 'warn', 'error', 'assert'].forEach(method => {
+                console[method] = () => {};
+            });
+        });
+    </script>
+</head>
+<body style="background-color: transparent !important;">
+    <style>
+        canvas {
+            position: absolute;
+            width: -webkit-fill-available;
+            top: 0;
+            left: 0;
+            overflow: hidden;
+            display: none;
+        }
+    </style>
+</body>
+</html>
