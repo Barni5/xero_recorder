@@ -3,13 +3,13 @@
     This <b>free product</b> has been brought to you by <a href="https://discord.gg/eYH7Ek6Zpb">XeroShield</a>. The best <b> FiveM AntiCheat</b>.
 </p>
 
-<h2>Exports</h2>
+## Exports
 ```
 -- make a clip
 exports['resourcename']:RecordVideo()
 ```
 
-<h2>Example</h2>
+## Example
 ```
 -- example
 local url = exports['xero_record_module']:RecordVideo()
