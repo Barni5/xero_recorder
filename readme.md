@@ -14,5 +14,4 @@ exports['resourcename']:RecordVideo()
 -- example
 local url = exports['xero_record_module']:RecordVideo()
 print("The video url: "..url)
-
 ```
