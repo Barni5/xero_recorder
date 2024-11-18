@@ -12,6 +12,6 @@ exports['resourcename']:RecordVideo()
 ## Example
 ```
 -- example
-local url = exports['xero_record_module']:RecordVideo()
+local url = exports['xero_recorder']:RecordVideo()
 print("The video url: "..url)
 ```
